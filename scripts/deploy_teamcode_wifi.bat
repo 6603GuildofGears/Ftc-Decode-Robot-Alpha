@@ -10,6 +10,7 @@ REM
 REM Notes:
 REM - Requires Android SDK platform-tools (adb) and working Gradle wrapper.
 REM - Installs the :TeamCode debug build onto the connected Control Hub.
+REM - Automatically disconnects ADB on exit (success or failure)
 
 setlocal EnableDelayedExpansion
 
@@ -123,13 +124,24 @@ REM Connect ADB
 echo [deploy] Connecting ADB to %TARGET% ...
 "%ADB%" connect %TARGET% >nul 2>&1
 
-REM Verify connection
-"%ADB%" devices | findstr /C:"%TARGET%" >nul
-if !errorlevel! neq 0 (
+REM Check device connection status
+set DEVICE_STATUS=
+for /f "tokens=2" %%i in ('"%ADB%" devices ^| findstr /C:"%TARGET%"') do set DEVICE_STATUS=%%i
+
+if "%DEVICE_STATUS%"=="" (
     echo [deploy][error] ADB does not list %TARGET%. Ensure Control Hub is reachable over Wi-Fi.
     "%ADB%" devices
-    exit /b 1
+    goto cleanup_and_exit_error
 )
+
+if "%DEVICE_STATUS%"=="offline" (
+    echo [deploy][error] Device %TARGET% is OFFLINE.
+    echo [deploy] Please restart the Robot Control Hub and wait for it to fully boot up.
+    echo [deploy] After restart, run this script again.
+    "%ADB%" devices
+    goto cleanup_and_exit_error
+)
+
 echo [deploy] ADB connected to %TARGET%.
 
 REM Optional clean
@@ -138,7 +150,7 @@ if %DO_CLEAN%==1 (
     call gradlew.bat clean
     if !errorlevel! neq 0 (
         echo [deploy][error] Clean failed
-        exit /b 1
+        goto cleanup_and_exit_error
     )
 )
 
@@ -147,7 +159,7 @@ echo [deploy] Installing :TeamCode:installDebug ... (this may take a bit)
 call gradlew.bat :TeamCode:installDebug
 if !errorlevel! neq 0 (
     echo [deploy][error] Install failed
-    exit /b 1
+    goto cleanup_and_exit_error
 )
 echo [deploy] Install complete.
 
@@ -158,5 +170,19 @@ if %DO_RESTART%==1 (
     echo [deploy] Launch command sent.
 )
 
-echo [deploy] Done. You can now disconnect from this network if needed.
+echo [deploy] Done. ADB will disconnect automatically.
+goto cleanup_and_exit_success
+
+:cleanup_and_exit_error
+if not "%ADB%"=="" if not "%TARGET%"=="" (
+    echo [deploy] Disconnecting ADB from %TARGET% ...
+    "%ADB%" disconnect %TARGET% >nul 2>&1
+)
+exit /b 1
+
+:cleanup_and_exit_success
+if not "%ADB%"=="" if not "%TARGET%"=="" (
+    echo [deploy] Disconnecting ADB from %TARGET% ...
+    "%ADB%" disconnect %TARGET% >nul 2>&1
+)
 exit /b 0

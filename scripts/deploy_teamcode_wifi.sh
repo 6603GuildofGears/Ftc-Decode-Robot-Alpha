@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Cleanup function to disconnect ADB on exit
+cleanup() {
+  if [[ -n "${ADB:-}" && -n "${TARGET:-}" ]]; then
+    log "Disconnecting ADB from ${TARGET} ..."
+    "${ADB}" disconnect "${TARGET}" >/dev/null 2>&1 || true
+  fi
+}
+
+# Register cleanup to run on script exit (success or failure)
+trap cleanup EXIT
+
 # Wi‑Fi deploy helper for FTC TeamCode on REV Control Hub
 #
 # Usage examples:
@@ -110,8 +121,20 @@ fi
 log "Connecting ADB to ${TARGET} ..."
 "${ADB}" connect "${TARGET}" >/dev/null || true
 
-if ! "${ADB}" devices | grep -q "${TARGET}"; then
+# Check device connection status
+DEVICE_STATUS=""
+if "${ADB}" devices | grep -q "${TARGET}"; then
+  DEVICE_STATUS=$("${ADB}" devices | grep "${TARGET}" | awk '{print $2}')
+fi
+
+if [[ -z "${DEVICE_STATUS}" ]]; then
   err "ADB does not list ${TARGET}. Ensure Control Hub is reachable over Wi‑Fi."
+  "${ADB}" devices | sed 's/^/[adb] /'
+  exit 1
+elif [[ "${DEVICE_STATUS}" == "offline" ]]; then
+  err "Device ${TARGET} is OFFLINE."
+  log "Please restart the Robot Control Hub and wait for it to fully boot up."
+  log "After restart, run this script again."
   "${ADB}" devices | sed 's/^/[adb] /'
   exit 1
 fi
@@ -136,4 +159,4 @@ if (( DO_RESTART )); then
   fi
 fi
 
-log "Done. You can now disconnect from this network if needed."
+log "Done. ADB will disconnect automatically."
